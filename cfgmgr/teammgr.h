@@ -25,6 +25,7 @@ private:
     Table m_cfgPortTable;
     Table m_cfgLagTable;
     Table m_cfgLagMemberTable;
+    Table m_cfgModeTable;
     Table m_statePortTable;
     Table m_stateLagTable;
     Table m_stateMACsecIngressSATable;
@@ -33,6 +34,7 @@ private:
     ProducerStateTable m_appLagTable;
 
     std::set<std::string> m_lagList;
+     std::string m_teamdMode;
 
     MacAddress m_mac;
 
@@ -40,6 +42,7 @@ private:
     void doLagTask(Consumer &consumer);
     void doLagMemberTask(Consumer &consumer);
     void doPortUpdateTask(Consumer &consumer);
+    void doTeamdmodeTask(Consumer &consumer);
 
     task_process_status addLag(const std::string &alias, int min_links, bool fall_back, bool fast_rate);
     bool removeLag(const std::string &alias);
@@ -61,4 +64,6 @@ private:
     uint16_t generateLacpKey(const std::string&);
 };
 
+#define TEAMD_MULTI_SOCK_PATH "/var/run/teamd/teamd.sock"
+#define TEAMD_IPC_REQ "REQUEST"
 }

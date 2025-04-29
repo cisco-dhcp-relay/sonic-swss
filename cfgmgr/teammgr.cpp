@@ -20,6 +20,12 @@
 #include <sys/types.h>
 #include <signal.h>
 
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#include <cstring>
+
+
 
 using namespace std;
 using namespace swss;
@@ -32,6 +38,7 @@ TeamMgr::TeamMgr(DBConnector *confDb, DBConnector *applDb, DBConnector *statDb,
     m_cfgPortTable(confDb, CFG_PORT_TABLE_NAME),
     m_cfgLagTable(confDb, CFG_LAG_TABLE_NAME),
     m_cfgLagMemberTable(confDb, CFG_LAG_MEMBER_TABLE_NAME),
+    m_cfgModeTable(confDb, CFG_TEAMD_MODE_TABLE_NAME),
     m_appPortTable(applDb, APP_PORT_TABLE_NAME),
     m_appLagTable(applDb, APP_LAG_TABLE_NAME),
     m_statePortTable(statDb, STATE_PORT_TABLE_NAME),
@@ -165,6 +172,50 @@ void TeamMgr::doTask(Consumer &consumer)
     else if (table == STATE_PORT_TABLE_NAME)
     {
         doPortUpdateTask(consumer);
+    }
+    else if (table == CFG_TEAMD_MODE_TABLE_NAME)
+    {
+        doTeamdmodeTask(consumer);
+    }
+
+}
+
+void TeamMgr::doTeamdmodeTask(Consumer &consumer)
+{
+    SWSS_LOG_ENTER();
+
+    auto it = consumer.m_toSync.begin();
+    while (it != consumer.m_toSync.end())
+    {
+        KeyOpFieldsValuesTuple t = it->second;
+
+        string op = kfvOp(t);
+
+        if (op == SET_COMMAND)
+        {
+            for (auto i : kfvFieldsValues(t))
+            {
+                if (fvField(i) == "mode")
+                {
+                    m_teamdMode = fvValue(i);
+                    SWSS_LOG_NOTICE("Set global teamd mode to %s", m_teamdMode.c_str());
+                }
+            }
+
+        }
+        else if (op == DEL_COMMAND)
+        {
+           if (m_lagList.size() == 0) {
+               removeLag("teamd");
+           } else {
+                SWSS_LOG_ERROR("Failed to remove teamd.pid,please remove the portchannel");
+                 return;
+           }
+            m_teamdMode.clear();
+            SWSS_LOG_NOTICE("Cleared global teamd mode config");
+        }
+
+        it = consumer.m_toSync.erase(it);
     }
 }
 
@@ -561,6 +612,81 @@ bool TeamMgr::setLagLearnMode(const string &alias, const string &learn_mode)
     return true;
 }
 
+
+int send_ipc_to_teamd(const std::string& command,
+                      const std::vector<std::string>& args)
+{
+    int sockfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+    if (sockfd < 0)
+    {
+        SWSS_LOG_ERROR("Failed to create socket: %s", strerror(errno));
+        return -1;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, TEAMD_MULTI_SOCK_PATH, sizeof(addr.sun_path) - 1);
+
+    if (connect(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+    {
+        SWSS_LOG_ERROR("Failed to connect to teamd socket: %s", strerror(errno));
+        close(sockfd);
+        return -1;
+    }
+
+    std::ostringstream message;
+    message << TEAMD_IPC_REQ << "\n" << command << "\n";
+
+    for (size_t i = 0; i < args.size(); ++i)
+    {
+        std::string processed_arg = args[i];
+
+        // Only remove surrounding single quotes from JSON argument for PortChannelAdd
+        if (command == "PortChannelAdd" && i == args.size() - 1)
+        {
+            if (!processed_arg.empty() &&
+                processed_arg.front() == '\'' &&
+                processed_arg.back() == '\'')
+            {
+                processed_arg = processed_arg.substr(1, processed_arg.size() - 2);
+            }
+        }
+
+        message << processed_arg << "\n";
+    }
+
+    std::string final_msg = message.str();
+    SWSS_LOG_NOTICE("Sending IPC message to teamd:\n%s", final_msg.c_str());
+
+    ssize_t sent = send(sockfd, final_msg.c_str(), final_msg.length(), 0);
+    if (sent < 0)
+    {
+        SWSS_LOG_ERROR("Failed to send message to teamd: %s", strerror(errno));
+        close(sockfd);
+        return -1;
+    }
+
+    SWSS_LOG_NOTICE("Sent %s command to teamd (bytes sent: %zd)", command.c_str(), sent);
+
+    // Optional: read response from teamd
+    char buffer[512];
+    ssize_t received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+    if (received > 0)
+    {
+        buffer[received] = '\0';
+        SWSS_LOG_NOTICE("Response from teamd: %s", buffer);
+    }
+    else if (received < 0)
+    {
+        SWSS_LOG_WARN("No response from teamd or recv failed: %s", strerror(errno));
+    }
+
+    close(sockfd);
+    return 0;
+}
+
+
 task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fallback, bool fast_rate)
 {
     SWSS_LOG_ENTER();
@@ -572,6 +698,7 @@ task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fal
 
     const string dump_path = "/var/warmboot/teamd/";
     MacAddress mac_boot = m_mac;
+    static bool isFirstLag = true;
 
     // set portchannel mac same with mac before warmStart, when warmStart and there
     // is a file written by teamd.
@@ -629,19 +756,51 @@ task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fal
             alias.c_str(), conf.str().c_str());
 
     string warmstart_flag = WarmStart::isWarmStart() ? " -w -o" : " -r";
+    if (m_teamdMode == "single") {
+        SWSS_LOG_NOTICE("Operating in single-process teamd mode via IPC");
+       if (isFirstLag) {
 
-    cmd << TEAMD_CMD
-        << warmstart_flag
-        << " -t " << alias
-        << " -c " << conf.str()
-        << " -L " << dump_path
-        << " -g -d";
+           if (std::system("ln -sf /usr/bin/teamd /usr/bin/teamd-multi") != 0)
+           {
+                SWSS_LOG_ERROR("Failed to create symlink");
+                 return task_failed;
+           }
+           cmd << TEAMD_MULTI_CMD
+               << warmstart_flag
+               << " -t " << alias
+               << " -c " << conf.str()
+               << " -L " << dump_path
+               << " -g -d";
 
-    if (exec(cmd.str(), res) != 0)
-    {
-        SWSS_LOG_INFO("Failed to start port channel %s with teamd, retry...",
-                alias.c_str());
-        return task_need_retry;
+           if (exec(cmd.str(), res) != 0)
+           {
+                   SWSS_LOG_INFO("Failed to start port channel %s with teamd, retry...",
+				   alias.c_str());
+		   return task_need_retry;
+           }
+           isFirstLag = false;
+           return task_success;
+       } else {
+               send_ipc_to_teamd("PortChannelAdd", {alias, conf.str()});
+       }
+
+
+    }
+
+    else {
+
+       cmd << TEAMD_CMD
+           << warmstart_flag
+           << " -t " << alias
+           << " -c " << conf.str()
+           << " -L " << dump_path
+           << " -g -d";
+       if (exec(cmd.str(), res) != 0)
+       {
+	       SWSS_LOG_INFO("Failed to start port channel %s with teamd, retry...",
+		   	       alias.c_str());
+       	       return task_need_retry;
+       }
     }
 
     SWSS_LOG_NOTICE("Start port channel %s with teamd", alias.c_str());
@@ -652,6 +811,10 @@ task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fal
 bool TeamMgr::removeLag(const string &alias)
 {
     SWSS_LOG_ENTER();
+
+    if (m_teamdMode == "single") {
+       send_ipc_to_teamd("PortChannelRemove", { alias });
+    } else {
 
     pid_t pid;
 
@@ -676,7 +839,7 @@ bool TeamMgr::removeLag(const string &alias)
     }
 
     SWSS_LOG_NOTICE("Stop port channel %s", alias.c_str());
-
+    }
     return true;
 }
 
@@ -755,37 +918,75 @@ task_process_status TeamMgr::addLagMember(const string &lag, const string &membe
     cmd.str("");
     cmd.clear();
 
-    // Set admin down LAG member (required by teamd) and enslave it
-    // ip link set dev <member> down;
-    // teamdctl <port_channel_name> port config update <member> { "lacp_key": <lacp_key>, "link_watch": { "name": "ethtool" } };
-    // teamdctl <port_channel_name> port add <member>;
-    cmd << IP_CMD << " link set dev " << shellquote(member) << " down; ";
-    cmd << TEAMDCTL_CMD << " " << shellquote(lag) << " port config update " << shellquote(member)
-        << " '{\"lacp_key\":"
-        << keyId
-        << ",\"link_watch\": {\"name\": \"ethtool\"} }'; ";
-    cmd << TEAMDCTL_CMD << " " << shellquote(lag) << " port add " << shellquote(member);
+    if (m_teamdMode == "single") {
+	   cmd << IP_CMD << " link set dev " << shellquote(member) << " down";
+           if (exec(cmd.str(), res) != 0)
+           {
+                   SWSS_LOG_WARN("Failed to bring down port %s before IPC LAG add", member.c_str());
+                   return task_failed;
+           }
+            std::string portConfig = "{\"lacp_key\":" + std::to_string(keyId) +
+                             ",\"link_watch\": {\"name\": \"ethtool\"} }";
 
-    if (exec(cmd.str(), res) != 0)
-    {
-        // teamdctl port add command will fail when the member port is not
-        // set to admin status down; it is possible that some other processes
-        // or users (e.g. portmgrd) are executing the command to bring up the
-        // member port while adding this port into the port channel. This piece
-        // of code will check if the port is set to admin status up. If yes,
-        // it will retry to add the port into the port channel.
-        if (checkPortIffUp(member))
-        {
-            SWSS_LOG_INFO("Failed to add %s to port channel %s, retry...",
-                    member.c_str(), lag.c_str());
-            return task_need_retry;
-        }
-        else
-        {
-            SWSS_LOG_ERROR("Failed to add %s to port channel %s",
-                    member.c_str(), lag.c_str());
-            return task_failed;
-        }
+            if (send_ipc_to_teamd("PortConfigUpdate", { lag, member, portConfig }) != 0)
+            {
+                    SWSS_LOG_ERROR("IPC: Failed to send PortConfigUpdate for %s in %s", member.c_str(), lag.c_str());
+                    return task_failed;
+            }
+            SWSS_LOG_NOTICE("IPC: Sent PortConfigUpdate for %s to port channel %s", member.c_str(), lag.c_str());
+
+            // Step 2: Send PortAdd via IPC.
+            if (send_ipc_to_teamd("PortAdd", { lag, member }) != 0)
+            {
+                    if (checkPortIffUp(member))
+                    {
+                            SWSS_LOG_INFO("IPC: Failed to add %s to port channel %s, retry...", member.c_str(), lag.c_str());
+                            return task_need_retry;
+                    }
+                    else
+                    {
+                            SWSS_LOG_ERROR("IPC: Failed to add %s to port channel %s", member.c_str(), lag.c_str());
+                            return task_failed;
+                    }
+            }
+
+            SWSS_LOG_NOTICE("IPC: Successfully added %s to port channel %s", member.c_str(), lag.c_str());
+
+
+    } else {
+
+       // Set admin down LAG member (required by teamd) and enslave it
+       // ip link set dev <member> down;
+       // teamdctl <port_channel_name> port config update <member> { "lacp_key": <lacp_key>, "link_watch": { "name": "ethtool" } };
+       // teamdctl <port_channel_name> port add <member>;
+       cmd << IP_CMD << " link set dev " << shellquote(member) << " down; ";
+       cmd << TEAMDCTL_CMD << " " << shellquote(lag) << " port config update " << shellquote(member)
+           << " '{\"lacp_key\":"
+           << keyId
+           << ",\"link_watch\": {\"name\": \"ethtool\"} }'; ";
+       cmd << TEAMDCTL_CMD << " " << shellquote(lag) << " port add " << shellquote(member);
+
+       if (exec(cmd.str(), res) != 0)
+       {
+           // teamdctl port add command will fail when the member port is not
+           // set to admin status down; it is possible that some other processes
+           // or users (e.g. portmgrd) are executing the command to bring up the
+           // member port while adding this port into the port channel. This piece
+           // of code will check if the port is set to admin status up. If yes,
+           // it will retry to add the port into the port channel.
+           if (checkPortIffUp(member))
+           {
+               SWSS_LOG_INFO("Failed to add %s to port channel %s, retry...",
+                       member.c_str(), lag.c_str());
+               return task_need_retry;
+           }
+           else
+           {
+               SWSS_LOG_ERROR("Failed to add %s to port channel %s",
+                       member.c_str(), lag.c_str());
+               return task_failed;
+           }
+       }
     }
 
     vector<FieldValueTuple> fvs;
@@ -839,8 +1040,14 @@ bool TeamMgr::removeLagMember(const string &lag, const string &member)
     stringstream cmd;
     string res;
 
-    // teamdctl <port_channel_name> port remove <member>;
-    cmd << TEAMDCTL_CMD << " " << lag << " port remove " << member << "; ";
+    if (m_teamdMode == "single") {
+           send_ipc_to_teamd("PortRemove", { lag, member });
+    }
+
+    else {
+	    // teamdctl <port_channel_name> port remove <member>;
+	   cmd << TEAMDCTL_CMD << " " << lag << " port remove " << member << "; ";
+    }
 
     vector<FieldValueTuple> fvs;
     m_cfgPortTable.get(member, fvs);
