@@ -18,7 +18,11 @@ public:
             const std::vector<TableConnector> &tables);
 
     using Orch::doTask;
+    void ipcInitTeamd();
+    int send_ipc_to_teamd(const std::string& command,
+                      const std::vector<std::string>& args);
     void cleanTeamProcesses();
+    void ipcCleanup();
 
 private:
     Table m_cfgMetadataTable;   // To retrieve MAC address
@@ -34,7 +38,8 @@ private:
     ProducerStateTable m_appLagTable;
 
     std::set<std::string> m_lagList;
-     std::string m_teamdMode;
+    bool m_teamdMode = false;
+    int sockfd;
 
     MacAddress m_mac;
 
@@ -64,6 +69,8 @@ private:
     uint16_t generateLacpKey(const std::string&);
 };
 
-#define TEAMD_MULTI_SOCK_PATH "/var/run/teamd/teamd.sock"
+#define TEAMD_MULTI_SOCK_PATH "/var/run/teamd/teamd-unified.sock"
 #define TEAMD_IPC_REQ "REQUEST"
+
+
 }

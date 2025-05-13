@@ -4,9 +4,14 @@
 #include <logger.h>
 
 #include "teamdctl_mgr.h"
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#include <cstring>
+#include <errno.h>
+#include <sstream>
 
 #define MAX_RETRY 3
-
 ///
 /// Custom function for libteamdctl logger. IT is empty to prevent libteamdctl to spam us with the error messages
 /// @param tdc teamdctl descriptor
@@ -59,7 +64,9 @@ bool TeamdCtlMgr::has_key(const std::string & lag_name) const
 /// @return true if the lag was added or postponed successfully, false otherwise
 ///
 bool TeamdCtlMgr::add_lag(const std::string & lag_name)
+
 {
+
     if (has_key(lag_name))
     {
         SWSS_LOG_DEBUG("The LAG '%s' was already added. Skip adding it.", lag_name.c_str());
@@ -77,6 +84,15 @@ bool TeamdCtlMgr::add_lag(const std::string & lag_name)
 ///
 bool TeamdCtlMgr::try_add_lag(const std::string & lag_name)
 {
+
+    if (m_Mode)
+    {
+        SWSS_LOG_NOTICE("In default. LAG='%s' will be handled via IPC.", lag_name.c_str());
+        m_handlers.emplace(lag_name, nullptr);  
+        return true;
+    }
+
+    else {
     if (m_lags_to_add.find(lag_name) == m_lags_to_add.end())
     {
         m_lags_to_add[lag_name] = 0;
@@ -111,6 +127,7 @@ bool TeamdCtlMgr::try_add_lag(const std::string & lag_name)
     SWSS_LOG_NOTICE("The LAG '%s' has been added.", lag_name.c_str());
 
     return true;
+    }
 }
 
 ///
@@ -121,8 +138,17 @@ bool TeamdCtlMgr::try_add_lag(const std::string & lag_name)
 ///
 bool TeamdCtlMgr::remove_lag(const std::string & lag_name)
 {
+
+
     if (has_key(lag_name))
     {
+	if (m_Mode) 
+        {
+		m_handlers.erase(lag_name);
+		SWSS_LOG_NOTICE("The LAG '%s' has been removed from db.", lag_name.c_str());
+
+	}
+
         auto tdc = m_handlers[lag_name];
         teamdctl_disconnect(tdc);
         teamdctl_free(tdc);
@@ -184,6 +210,28 @@ TeamdCtlDump TeamdCtlMgr::get_dump(const std::string & lag_name, bool to_retry)
     TeamdCtlDump res = { false, "" };
     if (has_key(lag_name))
     {
+
+     if (m_Mode) 
+     {
+    
+        std::string ipc_response;
+        int ret = send_ipc_to_teamd("StateDump", {lag_name}, ipc_response); // Send the IPC request
+        if (ret == 0)
+
+        {
+	    auto pos = ipc_response.find('{');
+            if (pos != std::string::npos)
+            {
+                ipc_response.erase(0, pos);
+            }
+            res = {true, ipc_response}; // Get the response from teamd via IPC
+            m_lags_err_retry.erase(lag_name); // Clear retry count on success
+        }
+        else
+        {
+            SWSS_LOG_ERROR("IPC get_dump failed for LAG '%s'", lag_name.c_str());
+        }
+     } else {
         auto tdc = m_handlers[lag_name];
         char * dump;
         int r = teamdctl_state_get_raw_direct(tdc, &dump);
@@ -220,12 +268,14 @@ TeamdCtlDump TeamdCtlMgr::get_dump(const std::string & lag_name, bool to_retry)
 		    m_lags_err_retry[lag_name] = 1;
                 }
             }
+	
             else
             {
                 // No need to retry if the flag is not set.
                 SWSS_LOG_ERROR("Can't get dump for LAG '%s'. Skipping", lag_name.c_str());
             }
         }
+     }
     }
     else
     {
@@ -256,5 +306,66 @@ TeamdCtlDumps TeamdCtlMgr::get_dumps(bool to_retry)
     }
 
     return res;
+}
+
+
+int TeamdCtlMgr::send_ipc_to_teamd(const std::string& command,
+                      const std::vector<std::string>& args,
+                      std::string& response_out)
+{
+    int sockfd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+    if (sockfd < 0)
+    {
+        SWSS_LOG_ERROR("Failed to create socket: %s", strerror(errno));
+        return -1;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, TEAMD_MULTI_SOCK_PATH, sizeof(addr.sun_path) - 1);
+
+    if (connect(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+    {
+        SWSS_LOG_ERROR("Failed to connect to teamd socket: %s", strerror(errno));
+        close(sockfd);
+        return -1;
+    }
+
+    std::ostringstream message;
+    message << TEAMD_IPC_REQ << "\n" << command << "\n";
+
+    for (size_t i = 0; i < args.size(); ++i)
+    {
+        message << args[i] << "\n";
+    }
+
+    std::string final_msg = message.str();
+    SWSS_LOG_NOTICE("Sending IPC message to teamd:\n%s", final_msg.c_str());
+
+    ssize_t sent = send(sockfd, final_msg.c_str(), final_msg.length(), 0);
+    if (sent < 0)
+    {
+        SWSS_LOG_ERROR("Failed to send message to teamd: %s", strerror(errno));
+        close(sockfd);
+        return -1;
+    }
+
+    char buffer[2048];
+    ssize_t received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+    if (received > 0)
+    {
+        buffer[received] = '\0';
+        response_out = std::string(buffer);
+	SWSS_LOG_NOTICE("Response from teamd to teammgrd: %s", buffer);
+        close(sockfd);
+        return 0;
+    }
+    else
+    {
+        SWSS_LOG_WARN("No response from teamd or recv failed: %s", strerror(errno));
+        close(sockfd);
+        return -1;
+    }
 }
 
