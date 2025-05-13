@@ -10,6 +10,7 @@
 #include "teamdctl_mgr.h"
 #include "values_store.h"
 #include "subintf.h"
+#include <syslog.h>
 
 
 bool g_run = true;
@@ -88,15 +89,42 @@ int main()
     {
         swss::Logger::linkToDbNative("tlm_teamd");
         SWSS_LOG_NOTICE("Starting");
-        swss::DBConnector db("STATE_DB", 0);
-
-        ValuesStore values_store(&db);
-        TeamdCtlMgr teamdctl_mgr;
+	swss::DBConnector db("STATE_DB", 0);
+	ValuesStore values_store(&db);
+	TeamdCtlMgr teamdctl_mgr;
 
         swss::Select s;
         swss::Selectable * event;
         swss::SubscriberStateTable sst_lag(&db, STATE_LAG_TABLE_NAME);
         s.addSelectable(&sst_lag);
+	swss::DBConnector config_db("CONFIG_DB", 0);
+
+        swss::Table table(&config_db, "TEAMD");
+        std::vector<swss::FieldValueTuple> values;
+
+        std::string m_teamdmode;
+        bool  key_exists = table.get("GLOBAL", values);
+        syslog(LOG_INFO,"mode exists :%d",key_exists);
+
+        if (key_exists && !values.empty())
+        {
+            for (const auto& fv : values)
+            {
+                if (fv.first == "mode" && fv.second == "multi-process")
+
+                {
+                    syslog(LOG_INFO,"switching to legacy mode %s:%s",fv.first.c_str(),fv.second.c_str());
+                    m_teamdmode = fv.second;
+                    break;
+                }
+            }
+	}
+    	if (m_teamdmode == "multi-process") {
+		teamdctl_mgr.m_Mode = false;
+    	} else {
+		teamdctl_mgr.m_Mode = true;
+	}
+
 
         while (g_run && rc == 0)
         {
@@ -113,6 +141,7 @@ int main()
             }
             else if (res == swss::Select::TIMEOUT)
             {
+
                 teamdctl_mgr.process_add_queue();
                 // In the case of lag removal, there is a scenario where the select::TIMEOUT
                 // occurs, it triggers get_dumps incorrectly for resource which was in process of 
