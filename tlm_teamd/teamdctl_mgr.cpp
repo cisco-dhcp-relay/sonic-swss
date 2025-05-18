@@ -148,12 +148,13 @@ bool TeamdCtlMgr::remove_lag(const std::string & lag_name)
 		SWSS_LOG_NOTICE("The LAG '%s' has been removed from db.", lag_name.c_str());
 
 	}
-
-        auto tdc = m_handlers[lag_name];
-        teamdctl_disconnect(tdc);
-        teamdctl_free(tdc);
-        m_handlers.erase(lag_name);
-        SWSS_LOG_NOTICE("The LAG '%s' has been removed.", lag_name.c_str());
+	else {
+		auto tdc = m_handlers[lag_name];
+	   	teamdctl_disconnect(tdc);
+		teamdctl_free(tdc);
+		m_handlers.erase(lag_name);
+	 	SWSS_LOG_NOTICE("The LAG '%s' has been removed.", lag_name.c_str());
+	}
     }
     else if (m_lags_to_add.find(lag_name) != m_lags_to_add.end())
     {
@@ -229,8 +230,34 @@ TeamdCtlDump TeamdCtlMgr::get_dump(const std::string & lag_name, bool to_retry)
         }
         else
         {
-            SWSS_LOG_ERROR("IPC get_dump failed for LAG '%s'", lag_name.c_str());
+            // In case of failure and retry flag is set, check if it fails for MAX_RETRY times.
+            if (to_retry)
+            {
+                if (m_lags_err_retry.find(lag_name) != m_lags_err_retry.end())
+                {
+                    if (m_lags_err_retry[lag_name] == MAX_RETRY)
+                    {
+                        SWSS_LOG_ERROR("Can't get dump for LAG '%s'. Skipping", lag_name.c_str());
+                        m_lags_err_retry.erase(lag_name);
+                    }
+                    else
+                        m_lags_err_retry[lag_name]++;
+                }
+                else
+                {
+
+                    // This time a different lag interface errored out.
+                    m_lags_err_retry[lag_name] = 1;
+                }
+            }
+
+            else
+            {
+                // No need to retry if the flag is not set.
+                SWSS_LOG_ERROR("Can't get dump for LAG '%s'. Skipping", lag_name.c_str());
+            }
         }
+
      } else {
         auto tdc = m_handlers[lag_name];
         char * dump;
@@ -351,7 +378,7 @@ int TeamdCtlMgr::send_ipc_to_teamd(const std::string& command,
         return -1;
     }
 
-    char buffer[2048];
+    char buffer[16384];
     ssize_t received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
     if (received > 0)
     {

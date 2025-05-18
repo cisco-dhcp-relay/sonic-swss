@@ -217,8 +217,9 @@ void TeamMgr::cleanTeamProcesses()
 
     std::unordered_map<std::string, int> aliasPidMap;
 
-    for (const auto& alias: m_lagList)
-    {
+    if (m_teamdMode == false) {
+        for (const auto& alias: m_lagList)
+        {
         pid_t pid;
         // Sleep for 10 milliseconds so as to not overwhelm the netlink
         // socket buffers with events about interfaces going down
@@ -255,8 +256,47 @@ void TeamMgr::cleanTeamProcesses()
         {
             SWSS_LOG_NOTICE("Sent SIGTERM to port channel %s pid %d", alias.c_str(), pid);
         }
+        }
     }
+    else {
+        std::string alias = "teamd-unified";
+        pid_t pid;
+        // Sleep for 10 milliseconds so as to not overwhelm the netlink
+        // socket buffers with events about interfaces going down
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
+        try
+        {
+            ifstream pidFile("/var/run/teamd/" + alias + ".pid");
+            if (pidFile.is_open())
+            {
+                pidFile >> pid;
+                aliasPidMap[alias] = pid;
+                SWSS_LOG_INFO("Read port channel %s pid %d", alias.c_str(), pid);
+            }
+            else
+            {
+                SWSS_LOG_NOTICE("Unable to read pid file for %s, skipping...", alias.c_str());
+                //continue;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            // Handle Warm/Fast reboot scenario
+            SWSS_LOG_NOTICE("Skipping non-existent port channel %s pid...", alias.c_str());
+            //continue;
+        }
+
+        if (kill(pid, SIGTERM))
+        {
+            SWSS_LOG_ERROR("Failed to send SIGTERM to port channel %s pid %d: %s", alias.c_str(), pid, strerror(errno));
+            aliasPidMap.erase(alias);
+        }
+        else
+        {
+            SWSS_LOG_NOTICE("Sent SIGTERM to port channel %s pid %d", alias.c_str(), pid);
+        }
+    }
     for (const auto& cit: aliasPidMap)
     {
         const auto &alias = cit.first;
@@ -773,12 +813,7 @@ task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fal
 
     if (m_teamdMode) {
         SWSS_LOG_NOTICE("Operating in single-process teamd mode via IPC");
-        //send_ipc_to_teamd("PortChannelAdd", {alias, conf.str()});
-        if (send_ipc_to_teamd("PortChannelAdd", {alias, conf.str()}) == task_need_retry)
-	{
-	    	SWSS_LOG_INFO("Failed to start port channel %s with teamd, retry...", alias.c_str());
-	    	return task_need_retry;
-	}
+        send_ipc_to_teamd("PortChannelAdd", {alias, conf.str()});
     }
 
     else { 
@@ -925,7 +960,7 @@ task_process_status TeamMgr::addLagMember(const string &lag, const string &membe
 	     std::string portConfig = "{\"lacp_key\":" + std::to_string(keyId) +
                              ",\"link_watch\": {\"name\": \"ethtool\"} }";
 	  
-	     if (send_ipc_to_teamd("PortConfigUpdate", { lag, member, portConfig }) != task_need_retry)
+	     if (send_ipc_to_teamd("PortConfigUpdate", { lag, member, portConfig }) != 0)
 	     {
 	     	     SWSS_LOG_ERROR("IPC: Failed to send PortConfigUpdate for %s in %s", member.c_str(), lag.c_str());
 	     	     return task_need_retry;
@@ -934,7 +969,7 @@ task_process_status TeamMgr::addLagMember(const string &lag, const string &membe
 	     SWSS_LOG_NOTICE("IPC: Sent PortConfigUpdate for %s to port channel %s", member.c_str(), lag.c_str());
 	 
 	     // Step 2: Send PortAdd via IPC.
-	     if (send_ipc_to_teamd("PortAdd", { lag, member }) != task_need_retry)
+	     if (send_ipc_to_teamd("PortAdd", { lag, member }) != 0)
 	     {
 	     	     if (checkPortIffUp(member))
 		     {
