@@ -88,15 +88,40 @@ int main()
     {
         swss::Logger::linkToDbNative("tlm_teamd");
         SWSS_LOG_NOTICE("Starting");
-        swss::DBConnector db("STATE_DB", 0);
-
-        ValuesStore values_store(&db);
-        TeamdCtlMgr teamdctl_mgr;
+	swss::DBConnector db("STATE_DB", 0);
+	ValuesStore values_store(&db);
+	TeamdCtlMgr teamdctl_mgr;
 
         swss::Select s;
         swss::Selectable * event;
         swss::SubscriberStateTable sst_lag(&db, STATE_LAG_TABLE_NAME);
         s.addSelectable(&sst_lag);
+	swss::DBConnector config_db("CONFIG_DB", 0);
+
+        swss::Table table(&config_db, "TEAMD");
+        std::vector<swss::FieldValueTuple> values;
+
+        std::string m_teamdMultiProcMode = "unified";
+        bool  key_exists = table.get("GLOBAL", values);
+
+        if (key_exists && !values.empty())
+        {
+            for (const auto& fv : values)
+            {
+                if (fv.first == "mode" && fv.second == "multi-process")
+
+                {
+                    m_teamdMultiProcMode = fv.second;
+                    break;
+                }
+            }
+	}
+    	if (m_teamdMultiProcMode == "multi-process") {
+		teamdctl_mgr.m_teamdUnifiedProcMode = false;
+    	} else {
+		teamdctl_mgr.m_teamdUnifiedProcMode = true;
+	}
+
 
         while (g_run && rc == 0)
         {
@@ -113,6 +138,7 @@ int main()
             }
             else if (res == swss::Select::TIMEOUT)
             {
+
                 teamdctl_mgr.process_add_queue();
                 // In the case of lag removal, there is a scenario where the select::TIMEOUT
                 // occurs, it triggers get_dumps incorrectly for resource which was in process of 
