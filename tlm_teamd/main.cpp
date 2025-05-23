@@ -10,7 +10,6 @@
 #include "teamdctl_mgr.h"
 #include "values_store.h"
 #include "subintf.h"
-#include <syslog.h>
 
 
 bool g_run = true;
@@ -102,9 +101,8 @@ int main()
         swss::Table table(&config_db, "TEAMD");
         std::vector<swss::FieldValueTuple> values;
 
-        std::string m_teamdmode;
+        std::string m_teamdMultiProcMode = "unified";
         bool  key_exists = table.get("GLOBAL", values);
-        syslog(LOG_INFO,"mode exists :%d",key_exists);
 
         if (key_exists && !values.empty())
         {
@@ -113,16 +111,15 @@ int main()
                 if (fv.first == "mode" && fv.second == "multi-process")
 
                 {
-                    syslog(LOG_INFO,"switching to legacy mode %s:%s",fv.first.c_str(),fv.second.c_str());
-                    m_teamdmode = fv.second;
+                    m_teamdMultiProcMode = fv.second;
                     break;
                 }
             }
 	}
-    	if (m_teamdmode == "multi-process") {
-		teamdctl_mgr.m_Mode = false;
+    	if (m_teamdMultiProcMode == "multi-process") {
+		teamdctl_mgr.m_teamdUnifiedProcMode = false;
     	} else {
-		teamdctl_mgr.m_Mode = true;
+		teamdctl_mgr.m_teamdUnifiedProcMode = true;
 	}
 
 

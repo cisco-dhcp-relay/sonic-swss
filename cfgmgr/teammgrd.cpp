@@ -66,7 +66,6 @@ int main(int argc, char **argv)
 
         TeamMgr teammgr(&conf_db, &app_db, &state_db, tables);
 
-	teammgr.ipcInitTeamd();
         vector<Orch *> cfgOrchList = {&teammgr};
 
         Select s;

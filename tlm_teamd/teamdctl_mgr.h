@@ -22,10 +22,10 @@ public:
     // Retry logic added to prevent incorrect error reporting in dump API's
     TeamdCtlDump get_dump(const std::string & lag_name, bool to_retry);
     TeamdCtlDumps get_dumps(bool to_retry);
-    int send_ipc_to_teamd(const std::string& command,
+    int sendIpcToTeamd(const std::string& command,
                       const std::vector<std::string>& args,
                       std::string& response_out);
-    bool m_Mode = false;
+    bool m_teamdUnifiedProcMode = false;
 
 
 private:
