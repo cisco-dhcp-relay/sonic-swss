@@ -19,7 +19,7 @@ public:
 
     using Orch::doTask;
     void ipcInitTeamd();
-    int send_ipc_to_teamd(const std::string& command,
+    int sendIpcToTeamd(const std::string& command,
                       const std::vector<std::string>& args);
     void cleanTeamProcesses();
     void ipcCleanup();
@@ -38,7 +38,7 @@ private:
     ProducerStateTable m_appLagTable;
 
     std::set<std::string> m_lagList;
-    bool m_teamdMode = false;
+    bool m_teamdUnifiedProcMode = false;
     int sockfd;
 
     MacAddress m_mac;
