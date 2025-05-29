@@ -66,9 +66,7 @@ bool TeamdCtlMgr::has_key(const std::string & lag_name) const
 /// @return true if the lag was added or postponed successfully, false otherwise
 ///
 bool TeamdCtlMgr::add_lag(const std::string & lag_name)
-
 {
-
     if (has_key(lag_name))
     {
         SWSS_LOG_DEBUG("The LAG '%s' was already added. Skip adding it.", lag_name.c_str());
@@ -142,16 +140,14 @@ bool TeamdCtlMgr::remove_lag(const std::string & lag_name)
 	if (m_teamdUnifiedProcMode) 
         {
 		m_handlers.erase(lag_name);
-		SWSS_LOG_NOTICE("The LAG '%s' has been removed from db.", lag_name.c_str());
-
 	}
 	else {
 		auto tdc = m_handlers[lag_name];
 	   	teamdctl_disconnect(tdc);
 		teamdctl_free(tdc);
 		m_handlers.erase(lag_name);
-	 	SWSS_LOG_NOTICE("The LAG '%s' has been removed.", lag_name.c_str());
 	}
+        SWSS_LOG_NOTICE("The LAG '%s' has been removed from db.", lag_name.c_str());
     }
     else if (m_lags_to_add.find(lag_name) != m_lags_to_add.end())
     {
@@ -371,7 +367,7 @@ int TeamdCtlMgr::sendIpcToTeamd(const std::string& command,
         return -1;
     }
 
-    char buffer[16384];
+    char buffer[65536];
     ssize_t received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
     if (received > 0)
     {

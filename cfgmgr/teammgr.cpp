@@ -747,7 +747,7 @@ task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fal
     MacAddress mac_boot = m_mac;
 
     // set portchannel mac same with mac before warmStart, when warmStart and there
-    // is a file written by teamd.    
+    // is a file written by teamd.
     ifstream aliasfile(dump_path + alias);
     if (WarmStart::isWarmStart() && aliasfile.is_open())
     {
@@ -1071,7 +1071,6 @@ bool TeamMgr::removeLagMember(const string &lag, const string &member)
     if (m_teamdUnifiedProcMode) {
 	    sendIpcToTeamd("PortRemove", { lag, member });
     }
- 
     else {
 	    // teamdctl <port_channel_name> port remove <member>;
 	    cmd << TEAMDCTL_CMD << " " << lag << " port remove " << member << "; ";

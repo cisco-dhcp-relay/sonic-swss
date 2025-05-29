@@ -47,7 +47,6 @@ private:
     void doLagTask(Consumer &consumer);
     void doLagMemberTask(Consumer &consumer);
     void doPortUpdateTask(Consumer &consumer);
-    void doTeamdmodeTask(Consumer &consumer);
 
     task_process_status addLag(const std::string &alias, int min_links, bool fall_back, bool fast_rate);
     bool removeLag(const std::string &alias);
