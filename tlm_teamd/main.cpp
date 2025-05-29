@@ -138,7 +138,6 @@ int main()
             }
             else if (res == swss::Select::TIMEOUT)
             {
-
                 teamdctl_mgr.process_add_queue();
                 // In the case of lag removal, there is a scenario where the select::TIMEOUT
                 // occurs, it triggers get_dumps incorrectly for resource which was in process of 

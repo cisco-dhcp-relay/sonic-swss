@@ -6,7 +6,6 @@
 
 #include <teamdctl.h>
 
-
 using TeamdCtlDump = std::pair<bool, std::string>;
 using TeamdCtlDumpsEntry = std::pair<std::string, std::string>;
 using TeamdCtlDumps = std::vector<TeamdCtlDumpsEntry>;
