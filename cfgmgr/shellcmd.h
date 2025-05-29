@@ -11,7 +11,6 @@
 #define BASH_CMD             "/bin/bash"
 #define GREP_CMD             "/bin/grep"
 #define TEAMD_CMD            "/usr/bin/teamd"
-#define TEAMD_CMD            "/usr/bin/teamd-multi"
 #define TEAMDCTL_CMD         "/usr/bin/teamdctl"
 #define IPTABLES_CMD         "/sbin/iptables"
 #define CONNTRACK_CMD        "/usr/sbin/conntrack"
