@@ -134,7 +134,6 @@ bool TeamdCtlMgr::try_add_lag(const std::string & lag_name)
 bool TeamdCtlMgr::remove_lag(const std::string & lag_name)
 {
 
-
     if (has_key(lag_name))
     {
 	if (m_teamdUnifiedProcMode) 

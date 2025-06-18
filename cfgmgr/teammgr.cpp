@@ -102,7 +102,6 @@ TeamMgr::TeamMgr(DBConnector *confDb, DBConnector *applDb, DBConnector *statDb,
        SWSS_LOG_INFO("start single process with teamd...");
     }
 
-
 }
 
 bool TeamMgr::isPortStateOk(const string &alias)
