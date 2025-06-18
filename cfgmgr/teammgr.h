@@ -71,5 +71,4 @@ private:
 #define TEAMD_MULTI_SOCK_PATH "/var/run/teamd/teamd-unified.sock"
 #define TEAMD_IPC_REQ "REQUEST"
 
-
 }

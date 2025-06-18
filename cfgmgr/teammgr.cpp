@@ -20,12 +20,10 @@
 #include <sys/types.h>
 #include <signal.h>
 
-
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <cstring>
-
 
 using namespace std;
 using namespace swss;
@@ -735,7 +733,6 @@ int TeamMgr::sendIpcToTeamd(const std::string& command, const std::vector<std::s
     return task_success;
 }
 
-
 task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fallback, bool fast_rate)
 {
     SWSS_LOG_ENTER();
@@ -814,21 +811,19 @@ task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fal
     }
 
     else { 
+       cmd << TEAMD_CMD
+           << warmstart_flag
+           << " -t " << alias
+           << " -c " << conf.str()
+           << " -L " << dump_path
+           << " -g -d";
 
-
-    cmd << TEAMD_CMD
-        << warmstart_flag
-        << " -t " << alias
-        << " -c " << conf.str()
-        << " -L " << dump_path
-        << " -g -d";
-
-    if (exec(cmd.str(), res) != 0)
-    {
-        SWSS_LOG_INFO("Failed to start port channel %s with teamd, retry...",
-                alias.c_str());
-        return task_need_retry;
-    }
+       if (exec(cmd.str(), res) != 0)
+       {
+           SWSS_LOG_INFO("Failed to start port channel %s with teamd, retry...",
+                   alias.c_str());
+           return task_need_retry;
+       }
     }
 
     SWSS_LOG_NOTICE("Start port channel %s with teamd", alias.c_str());

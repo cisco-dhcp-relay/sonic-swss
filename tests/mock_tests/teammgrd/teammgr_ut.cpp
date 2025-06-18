@@ -164,8 +164,6 @@ namespace teammgr_ut
 	    swss::Table cfg_mode_table = swss::Table(m_config_db.get(), CFG_TEAMD_MODE_TABLE_NAME);
             cfg_mode_table.set("GLOBAL",{ {"mode","multi-process"} });
 
-
-
             TableConnector conf_lag_table(m_config_db.get(), CFG_LAG_TABLE_NAME);
             TableConnector conf_lag_member_table(m_config_db.get(), CFG_LAG_MEMBER_TABLE_NAME);
             TableConnector state_port_table(m_state_db.get(), STATE_PORT_TABLE_NAME);
