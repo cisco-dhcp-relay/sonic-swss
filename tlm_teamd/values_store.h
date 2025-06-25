@@ -78,7 +78,7 @@ private:
         { "runner.statistics.lacpdu_rx_stats",     ValuesStore::json_type::integer },
         { "runner.statistics.lacpdu_tx_stats",     ValuesStore::json_type::integer },
         { "runner.statistics.lacpdu_illegal_pkts", ValuesStore::json_type::integer },
-        { "runner.statistics.last_lacpdu_rx",      ValuesStore::json_type::string  },
-        { "runner.statistics.last_lacpdu_tx",      ValuesStore::json_type::string  },
+        { "runner.statistics.last_lacpdu_rx_time", ValuesStore::json_type::string  },
+        { "runner.statistics.last_lacpdu_tx_time", ValuesStore::json_type::string  },
     };
 };
